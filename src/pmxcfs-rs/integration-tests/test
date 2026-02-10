@@ -1,0 +1,238 @@
+#!/bin/bash
+# Simple test runner for pmxcfs integration tests
+# Usage: ./test [options]
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Colors
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+NC=$'\033[0m'
+
+show_help() {
+    cat << EOF
+${CYAN}pmxcfs Integration Test Runner${NC}
+
+${GREEN}QUICK START:${NC}
+    ./test                    # Run all single-node tests
+    ./test rrd                # Run only RRD tests
+    ./test --cluster          # Run cluster tests (requires 3-node setup)
+    ./test --list             # List available test subsystems
+    ./test --clean            # Clean up containers and start fresh
+
+${GREEN}USAGE:${NC}
+    ./test [SUBSYSTEM] [OPTIONS]
+
+${GREEN}SUBSYSTEMS:${NC}
+    all            All tests (default)
+    core           Core functionality (paths, version)
+    fuse           FUSE filesystem operations
+    memdb          Database access and integrity
+    ipc            Socket and IPC communication
+    rrd            RRD metrics and schemas
+    status         Status tracking and VM registry
+    locks          Lock management
+    plugins        Plugin files
+    clusterlog     Cluster log functionality
+    cluster        Multi-node cluster tests (requires --cluster)
+    dfsm           DFSM synchronization (requires --cluster)
+    mixed          Mixed C/Rust cluster (requires --mixed)
+
+${GREEN}OPTIONS:${NC}
+    --cluster      Run multi-node cluster tests (3 nodes)
+    --mixed        Run mixed C/Rust cluster tests
+    --single       Run single-node tests only (default)
+    --build        Force rebuild of pmxcfs binary
+    --no-build     Skip binary rebuild (faster, use existing binary)
+    --clean        Clean up all containers and volumes before running
+    --list         List all available test subsystems and exit
+    -h, --help     Show this help message
+
+${GREEN}EXAMPLES:${NC}
+    # Quick test run (no rebuild, all single-node tests)
+    ./test --no-build
+
+    # Test only RRD subsystem
+    ./test rrd
+
+    # Test RRD with fresh build
+    ./test rrd --build
+
+    # Clean up and run all tests
+    ./test --clean
+
+    # Run cluster tests (requires 3-node setup)
+    ./test --cluster
+
+    # Run specific cluster subsystem
+    ./test dfsm --cluster
+
+    # List what tests are available
+    ./test --list
+
+${GREEN}ENVIRONMENT:${NC}
+    SKIP_BUILD=true     Skip build (same as --no-build)
+    USE_PODMAN=true     Force use of podman instead of docker
+
+${YELLOW}TIPS:${NC}
+    • First run: ./test --build (ensures binary is built)
+    • Iterating: ./test --no-build (much faster)
+    • Stuck? ./test --clean (removes all containers/volumes)
+    • Results saved to: results/test-results_*.log
+
+EOF
+}
+
+list_subsystems() {
+    cat << EOF
+${CYAN}Available Test Subsystems:${NC}
+
+${GREEN}Single-Node Tests:${NC}
+  core        (2 tests)  - Core functionality and paths
+  fuse        (1 test)   - FUSE filesystem operations
+  memdb       (1 test)   - Database access and integrity
+  ipc         (1 test)   - Socket and IPC communication
+  rrd         (3 tests)  - RRD metrics, schemas, rrdcached
+  status      (3 tests)  - Status tracking and VM registry
+  locks       (1 test)   - Lock management
+  plugins     (2 tests)  - Plugin files access
+  clusterlog  (3 tests)  - Cluster log functionality
+
+${GREEN}Multi-Node Tests (requires --cluster):${NC}
+  cluster     (2 tests)  - Multi-node cluster operations
+  dfsm        (2 tests)  - DFSM synchronization protocol
+
+${GREEN}Mixed Cluster Tests (requires --mixed):${NC}
+  mixed       (3 tests)  - C/Rust cluster compatibility
+
+${YELLOW}Total: 24 tests${NC}
+EOF
+}
+
+clean_containers() {
+    echo -e "${BLUE}Cleaning up containers and volumes...${NC}"
+
+    cd "$SCRIPT_DIR/docker"
+
+    # Detect container command
+    if command -v podman &> /dev/null; then
+        CONTAINER_CMD="podman"
+    else
+        CONTAINER_CMD="docker"
+    fi
+
+    # Stop and remove containers
+    $CONTAINER_CMD compose down -v 2>/dev/null || true
+
+    # Remove any stray containers
+    $CONTAINER_CMD ps -a --format "{{.Names}}" | grep -E "pmxcfs|docker-pmxcfs" | while read container; do
+        $CONTAINER_CMD rm -f "$container" 2>/dev/null || true
+    done
+
+    # Remove volumes
+    $CONTAINER_CMD volume ls --format "{{.Name}}" | grep -E "docker_test-data|pmxcfs" | while read volume; do
+        $CONTAINER_CMD volume rm -f "$volume" 2>/dev/null || true
+    done
+
+    echo -e "${GREEN}✓ Cleanup complete${NC}"
+}
+
+# Parse arguments
+SUBSYSTEM="all"
+MODE="single"
+CLEAN=false
+BUILD_FLAG=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        --list)
+            list_subsystems
+            exit 0
+            ;;
+        --clean)
+            CLEAN=true
+            shift
+            ;;
+        --cluster)
+            MODE="cluster"
+            shift
+            ;;
+        --mixed)
+            MODE="mixed"
+            shift
+            ;;
+        --single|--single-node)
+            MODE="single"
+            shift
+            ;;
+        --build)
+            BUILD_FLAG=""
+            SKIP_BUILD=false
+            shift
+            ;;
+        --no-build)
+            BUILD_FLAG="--skip-build"
+            SKIP_BUILD=true
+            shift
+            ;;
+        core|fuse|memdb|ipc|rrd|status|locks|plugins|clusterlog|cluster|dfsm|mixed|all)
+            SUBSYSTEM="$1"
+            shift
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown option '$1'${NC}"
+            echo "Run './test --help' for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Clean if requested
+if [ "$CLEAN" = true ]; then
+    clean_containers
+    echo ""
+fi
+
+# Validate subsystem for mode
+if [ "$MODE" = "single" ] && [[ "$SUBSYSTEM" =~ ^(cluster|dfsm)$ ]]; then
+    echo -e "${YELLOW}Warning: '$SUBSYSTEM' requires --cluster flag${NC}"
+    echo "Use: ./test $SUBSYSTEM --cluster"
+    exit 1
+fi
+
+if [ "$MODE" = "single" ] && [ "$SUBSYSTEM" = "mixed" ]; then
+    echo -e "${YELLOW}Warning: 'mixed' requires --mixed flag${NC}"
+    echo "Use: ./test --mixed"
+    exit 1
+fi
+
+# Build mode flag
+MODE_FLAG=""
+if [ "$MODE" = "cluster" ]; then
+    MODE_FLAG="--cluster"
+elif [ "$MODE" = "mixed" ]; then
+    MODE_FLAG="--mixed"
+fi
+
+# Run the actual test runner
+echo -e "${CYAN}Running pmxcfs integration tests${NC}"
+echo -e "Mode: ${GREEN}$MODE${NC}"
+echo -e "Subsystem: ${GREEN}$SUBSYSTEM${NC}"
+echo ""
+
+cd "$SCRIPT_DIR"
+
+if [ "$SUBSYSTEM" = "all" ]; then
+    exec ./run-tests.sh $MODE_FLAG $BUILD_FLAG
+else
+    exec ./run-tests.sh --subsystem "$SUBSYSTEM" $MODE_FLAG $BUILD_FLAG
+fi

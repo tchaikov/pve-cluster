@@ -1,0 +1,45 @@
+totem {
+    version: 2
+    cluster_name: pmxcfs-test
+    transport: udpu
+    interface {
+        ringnumber: 0
+        bindnetaddr: 172.20.0.0
+        broadcast: yes
+        mcastport: 5405
+    }
+}
+
+nodelist {
+    node {
+        ring0_addr: 172.20.0.11
+        name: node1
+        nodeid: 1
+        quorum_votes: 1
+    }
+    node {
+        ring0_addr: 172.20.0.12
+        name: node2
+        nodeid: 2
+        quorum_votes: 1
+    }
+    node {
+        ring0_addr: 172.20.0.13
+        name: node3
+        nodeid: 3
+        quorum_votes: 1
+    }
+}
+
+quorum {
+    provider: corosync_votequorum
+    expected_votes: 3
+    two_node: 0
+}
+
+logging {
+    to_logfile: yes
+    logfile: /var/log/corosync/corosync.log
+    to_syslog: yes
+    timestamp: on
+}

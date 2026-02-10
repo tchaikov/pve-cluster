@@ -1,0 +1,115 @@
+services:
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pmxcfs-test:latest
+    container_name: pmxcfs-cluster-node1
+    hostname: node1
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse
+    volumes:
+      - ../../../../:/workspace:ro
+      - ../results:/test/results
+      - node1-data:/test/db
+      - cluster-config:/etc/corosync
+    networks:
+      pmxcfs-cluster:
+        ipv4_address: 172.20.0.11
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+      - NODE_NAME=node1
+      - NODE_ID=1
+      - CLUSTER_TYPE=cluster
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep pmxcfs > /dev/null && test -d /test/pve"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pmxcfs-test:latest
+    container_name: pmxcfs-cluster-node2
+    hostname: node2
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse
+    volumes:
+      - ../../../../:/workspace:ro
+      - ../results:/test/results
+      - node2-data:/test/db
+      - cluster-config:/etc/corosync
+    networks:
+      pmxcfs-cluster:
+        ipv4_address: 172.20.0.12
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+      - NODE_NAME=node2
+      - NODE_ID=2
+      - CLUSTER_TYPE=cluster
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep pmxcfs > /dev/null && test -d /test/pve"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pmxcfs-test:latest
+    container_name: pmxcfs-cluster-node3
+    hostname: node3
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse
+    volumes:
+      - ../../../../:/workspace:ro
+      - ../results:/test/results
+      - node3-data:/test/db
+      - cluster-config:/etc/corosync
+    networks:
+      pmxcfs-cluster:
+        ipv4_address: 172.20.0.13
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+      - NODE_NAME=node3
+      - NODE_ID=3
+      - CLUSTER_TYPE=cluster
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep pmxcfs > /dev/null && test -d /test/pve"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+networks:
+  pmxcfs-cluster:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  cluster-config:

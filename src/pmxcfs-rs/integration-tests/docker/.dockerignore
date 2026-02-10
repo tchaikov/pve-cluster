@@ -1,0 +1,17 @@
+# Ignore test results and temporary files
+results/
+logs/
+*.log
+
+# Ignore git files
+.git/
+.gitignore
+
+# Ignore documentation
+*.md
+
+# Ignore temporary build files
+debian.sources.tmp
+
+# Ignore test directories (not needed for build)
+tests/

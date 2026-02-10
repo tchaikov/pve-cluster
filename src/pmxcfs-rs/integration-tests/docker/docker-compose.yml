@@ -1,0 +1,55 @@
+services:
+  pmxcfs-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pmxcfs-test:latest
+    container_name: pmxcfs-test
+    hostname: testnode
+    privileged: true
+    shm_size: '256m'  # Increase shared memory for ring buffer tests
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse
+    volumes:
+      - ../../../../:/workspace:ro
+      - ../results:/test/results
+      - test-data:/test/db
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+      - NODE_NAME=testnode
+      - NODE_ID=1
+    command: ["/workspace/src/pmxcfs-rs/target/release/pmxcfs", "--foreground", "--test-dir", "/test", "--local"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep pmxcfs > /dev/null && test -d /test/pve"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  c-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pmxcfs-test:latest
+    container_name: pmxcfs-c-tests
+    hostname: testnode
+    privileged: true
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    devices:
+      - /dev/fuse
+    volumes:
+      - ../../../../:/workspace:ro
+      - ../results:/test/results
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    command: ["/workspace/src/pmxcfs-rs/integration-tests/tests/run-c-tests.sh"]
+
+volumes:
+  test-data:
