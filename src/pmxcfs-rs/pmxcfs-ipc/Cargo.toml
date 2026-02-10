@@ -1,0 +1,44 @@
+[package]
+name = "pmxcfs-ipc"
+description = "libqb-compatible IPC server implementation in pure Rust"
+
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# System dependencies:
+# - libqb (runtime) - QB IPC library for client compatibility
+# - libqb-dev (build/test only) - Required to run wire protocol tests
+
+[dependencies]
+# Error handling
+anyhow.workspace = true
+
+# Async runtime
+tokio.workspace = true
+tokio-util.workspace = true
+
+# Concurrency primitives
+parking_lot.workspace = true
+
+# System integration
+libc.workspace = true
+nix.workspace = true
+memmap2 = "0.9"
+
+# Logging
+tracing.workspace = true
+
+# Async trait support
+async-trait.workspace = true
+
+[dev-dependencies]
+pmxcfs-test-utils = { path = "../pmxcfs-test-utils" }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+tracing-subscriber.workspace = true

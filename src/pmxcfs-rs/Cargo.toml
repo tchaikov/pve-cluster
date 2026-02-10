@@ -9,6 +9,7 @@ members = [
     "pmxcfs-status",     # Status monitoring and RRD data management
     "pmxcfs-test-utils", # Test utilities and helpers (dev-only)
     "pmxcfs-services",   # Service framework for automatic retry and lifecycle management
+    "pmxcfs-ipc",        # libqb-compatible IPC server
 ]
 resolver = "2"
 
@@ -30,9 +31,11 @@ pmxcfs-memdb = { path = "pmxcfs-memdb" }
 pmxcfs-status = { path = "pmxcfs-status" }
 pmxcfs-test-utils = { path = "pmxcfs-test-utils" }
 pmxcfs-services = { path = "pmxcfs-services" }
+pmxcfs-ipc = { path = "pmxcfs-ipc" }
 
 # Core async runtime
 tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
 
 # Error handling
 anyhow = "1.0"
@@ -40,6 +43,10 @@ thiserror = "1.0"
 
 # Logging and tracing
 tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Async trait support
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -54,6 +61,7 @@ parking_lot = "0.12"
 
 # System integration
 libc = "0.2"
+nix = { version = "0.29", features = ["socket", "poll"] }
 
 # Development dependencies
 tempfile = "3.8"
