@@ -1,0 +1,17 @@
+[package]
+name = "pmxcfs-services"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1"
+tokio = { version = "1.41", features = ["full"] }
+tokio-util = "0.7"
+tracing = "0.1"
+thiserror = "2.0"
+num_enum.workspace = true
+parking_lot = "0.12"
+
+[dev-dependencies]
+libc.workspace = true
+pmxcfs-test-utils = { path = "../pmxcfs-test-utils" }
