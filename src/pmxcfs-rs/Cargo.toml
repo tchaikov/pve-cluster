@@ -3,6 +3,7 @@
 members = [
     "pmxcfs-api-types",  # Shared types and error definitions
     "pmxcfs-config",     # Configuration management
+    "pmxcfs-logger",     # Cluster log with ring buffer and deduplication
 ]
 resolver = "2"
 
@@ -18,6 +19,7 @@ rust-version = "1.85"
 # Internal workspace dependencies
 pmxcfs-api-types = { path = "pmxcfs-api-types" }
 pmxcfs-config = { path = "pmxcfs-config" }
+pmxcfs-logger = { path = "pmxcfs-logger" }
 
 # Error handling
 thiserror = "1.0"
