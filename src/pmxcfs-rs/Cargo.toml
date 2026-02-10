@@ -1,6 +1,7 @@
 # Workspace root for pmxcfs Rust implementation
 [workspace]
 members = [
+    "pmxcfs-api-types",  # Shared types and error definitions
 ]
 resolver = "2"
 
@@ -13,7 +14,14 @@ repository = "https://git.proxmox.com/?p=pve-cluster.git"
 rust-version = "1.85"
 
 [workspace.dependencies]
-# Dependencies will be added incrementally as crates are introduced
+# Internal workspace dependencies
+pmxcfs-api-types = { path = "pmxcfs-api-types" }
+
+# Error handling
+thiserror = "1.0"
+
+# System integration
+libc = "0.2"
 
 [workspace.lints.clippy]
 uninlined_format_args = "warn"
