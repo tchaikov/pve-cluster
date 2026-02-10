@@ -6,6 +6,8 @@ members = [
     "pmxcfs-logger",     # Cluster log with ring buffer and deduplication
     "pmxcfs-rrd",        # RRD (Round-Robin Database) persistence
     "pmxcfs-memdb",      # In-memory database with SQLite persistence
+    "pmxcfs-status",     # Status monitoring and RRD data management
+    "pmxcfs-test-utils", # Test utilities and helpers (dev-only)
 ]
 resolver = "2"
 
@@ -24,6 +26,8 @@ pmxcfs-config = { path = "pmxcfs-config" }
 pmxcfs-logger = { path = "pmxcfs-logger" }
 pmxcfs-rrd = { path = "pmxcfs-rrd" }
 pmxcfs-memdb = { path = "pmxcfs-memdb" }
+pmxcfs-status = { path = "pmxcfs-status" }
+pmxcfs-test-utils = { path = "pmxcfs-test-utils" }
 
 # Core async runtime
 tokio = { version = "1.35", features = ["full"] }
