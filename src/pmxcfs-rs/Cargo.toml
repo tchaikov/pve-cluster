@@ -5,6 +5,7 @@ members = [
     "pmxcfs-config",     # Configuration management
     "pmxcfs-logger",     # Cluster log with ring buffer and deduplication
     "pmxcfs-rrd",        # RRD (Round-Robin Database) persistence
+    "pmxcfs-memdb",      # In-memory database with SQLite persistence
 ]
 resolver = "2"
 
@@ -22,6 +23,7 @@ pmxcfs-api-types = { path = "pmxcfs-api-types" }
 pmxcfs-config = { path = "pmxcfs-config" }
 pmxcfs-logger = { path = "pmxcfs-logger" }
 pmxcfs-rrd = { path = "pmxcfs-rrd" }
+pmxcfs-memdb = { path = "pmxcfs-memdb" }
 
 # Core async runtime
 tokio = { version = "1.35", features = ["full"] }
@@ -32,6 +34,14 @@ thiserror = "1.0"
 
 # Logging and tracing
 tracing = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+# Network and cluster
+bytes = "1.5"
+sha2 = "0.10"
 
 # Concurrency primitives
 parking_lot = "0.12"
