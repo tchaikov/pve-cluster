@@ -695,8 +695,8 @@ impl Status {
     /// This updates the CPG member list and synchronizes the online status
     /// in cluster_info to match current membership.
     ///
-    /// IMPORTANT: Both members and cluster_info are updated atomically under locks
-    /// to prevent TOCTOU where readers could see inconsistent state.
+    /// Both members and cluster_info are updated atomically under locks
+    /// to prevent readers from seeing inconsistent state.
     pub fn update_members(&self, members: Vec<pmxcfs_api_types::MemberInfo>) {
         // Acquire both locks before any updates to ensure atomicity
         // (matches C's single mutex protection in status.c)
