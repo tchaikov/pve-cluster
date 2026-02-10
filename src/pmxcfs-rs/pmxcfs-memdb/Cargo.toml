@@ -1,0 +1,42 @@
+[package]
+name = "pmxcfs-memdb"
+description = "In-memory database with SQLite persistence for pmxcfs"
+
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Error handling
+anyhow.workspace = true
+
+# Database
+rusqlite = { version = "0.30", features = ["bundled"] }
+
+# Concurrency primitives
+parking_lot.workspace = true
+
+# System integration
+libc.workspace = true
+
+# Cryptography (for checksums)
+sha2.workspace = true
+bytes.workspace = true
+
+# Serialization
+serde.workspace = true
+bincode.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# pmxcfs types
+pmxcfs-api-types = { path = "../pmxcfs-api-types" }
+
+[dev-dependencies]
+tempfile.workspace = true
