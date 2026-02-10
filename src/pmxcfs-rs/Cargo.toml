@@ -1,0 +1,31 @@
+# Workspace root for pmxcfs Rust implementation
+[workspace]
+members = [
+]
+resolver = "2"
+
+[workspace.package]
+version = "9.0.6"
+edition = "2024"
+authors = ["Proxmox Support Team <support@proxmox.com>"]
+license = "AGPL-3.0"
+repository = "https://git.proxmox.com/?p=pve-cluster.git"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Dependencies will be added incrementally as crates are introduced
+
+[workspace.lints.clippy]
+uninlined_format_args = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[patch.crates-io]
