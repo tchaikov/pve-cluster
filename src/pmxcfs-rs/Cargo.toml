@@ -8,6 +8,7 @@ members = [
     "pmxcfs-memdb",      # In-memory database with SQLite persistence
     "pmxcfs-status",     # Status monitoring and RRD data management
     "pmxcfs-test-utils", # Test utilities and helpers (dev-only)
+    "pmxcfs-services",   # Service framework for automatic retry and lifecycle management
 ]
 resolver = "2"
 
@@ -28,6 +29,7 @@ pmxcfs-rrd = { path = "pmxcfs-rrd" }
 pmxcfs-memdb = { path = "pmxcfs-memdb" }
 pmxcfs-status = { path = "pmxcfs-status" }
 pmxcfs-test-utils = { path = "pmxcfs-test-utils" }
+pmxcfs-services = { path = "pmxcfs-services" }
 
 # Core async runtime
 tokio = { version = "1.35", features = ["full"] }
