@@ -89,3 +89,7 @@ opt-level = 1
 debug = true
 
 [patch.crates-io]
+# Temporary patch for CPG group name length bug
+# Fixed in corosync upstream (commit 71d6d93c) but not yet released
+# Remove this patch when rust-corosync > 0.1.0 is published
+rust-corosync = { path = "vendor/rust-corosync" }
