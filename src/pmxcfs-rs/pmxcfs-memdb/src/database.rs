@@ -506,7 +506,7 @@ impl MemDb {
             anyhow::bail!("Database has errors, refusing operation");
         }
 
-        // CRITICAL FIX: Acquire write guard BEFORE any checks to prevent TOCTOU race
+        // Acquire write guard before any checks to prevent TOCTOU race
         // This ensures all validation and mutation happen atomically
         let _guard = self.inner.write_guard.lock();
 
@@ -666,7 +666,7 @@ impl MemDb {
             anyhow::bail!("Database has errors, refusing operation");
         }
 
-        // CRITICAL FIX: Acquire write guard BEFORE any checks to prevent TOCTOU race
+        // Acquire write guard before any checks to prevent TOCTOU race
         // This ensures lookup and mutation happen atomically
         let _guard = self.inner.write_guard.lock();
 
