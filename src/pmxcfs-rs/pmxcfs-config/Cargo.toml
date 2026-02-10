@@ -1,0 +1,19 @@
+[package]
+name = "pmxcfs-config"
+description = "Configuration management for pmxcfs"
+
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Concurrency primitives
+parking_lot.workspace = true
+
+# Logging
+tracing.workspace = true
