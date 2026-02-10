@@ -1,0 +1,23 @@
+[package]
+name = "pmxcfs-rrd"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["rrdcached"]
+rrdcached = []
+
+[dependencies]
+anyhow.workspace = true
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+nom = "8.0"
+rrd = "0.2"
+thiserror = "2.0"
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

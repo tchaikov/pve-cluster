@@ -4,6 +4,7 @@ members = [
     "pmxcfs-api-types",  # Shared types and error definitions
     "pmxcfs-config",     # Configuration management
     "pmxcfs-logger",     # Cluster log with ring buffer and deduplication
+    "pmxcfs-rrd",        # RRD (Round-Robin Database) persistence
 ]
 resolver = "2"
 
@@ -20,15 +21,26 @@ rust-version = "1.85"
 pmxcfs-api-types = { path = "pmxcfs-api-types" }
 pmxcfs-config = { path = "pmxcfs-config" }
 pmxcfs-logger = { path = "pmxcfs-logger" }
+pmxcfs-rrd = { path = "pmxcfs-rrd" }
+
+# Core async runtime
+tokio = { version = "1.35", features = ["full"] }
 
 # Error handling
+anyhow = "1.0"
 thiserror = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
 
 # Concurrency primitives
 parking_lot = "0.12"
 
 # System integration
 libc = "0.2"
+
+# Development dependencies
+tempfile = "3.8"
 
 [workspace.lints.clippy]
 uninlined_format_args = "warn"
