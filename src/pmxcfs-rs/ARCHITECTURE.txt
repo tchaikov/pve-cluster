@@ -1,0 +1,350 @@
+================================================================================
+                     pmxcfs-rs Architecture Overview
+================================================================================
+
+                         Crate Dependency Graph
+================================================================================
+
+                        +-------------------+
+                        | pmxcfs-api-types  |
+                        | (Shared Types)    |
+                        +-------------------+
+                                 ^
+                                 |
+          +----------------------+----------------------+
+          |                      |                      |
+          |                      |                      |
++---------+---------+  +---------+---------+  +---------+---------+
+| pmxcfs-config     |  | pmxcfs-memdb      |  | pmxcfs-rrd        |
+| (Configuration)   |  | (SQLite DB)       |  | (RRD Files)       |
++-------------------+  +-------------------+  +-------------------+
+          ^                      ^                      ^
+          |                      |                      |
+          |         +------------+------------+         |
+          |         |                         |         |
++---------+---------+              +---------+---------+
+| pmxcfs-ipc        |              | pmxcfs-status     |
+| (libqb Server)    |              | (VM/Node Status)  |
++-------------------+              +-------------------+
+          ^                                  ^
+          |                                  |
+          |         +------------------------+
+          |         |
++---------+---------+
+| pmxcfs-logger     |
+| (Cluster Log)     |
++-------------------+
+          ^
+          |
++---------+---------+              +-------------------+
+| pmxcfs-dfsm       |              | pmxcfs-services   |
+| (State Machine)   |              | (Service Mgmt)    |
++-------------------+              +-------------------+
+          ^                                  ^
+          |                                  |
+          +------------------+---------------+
+                             |
+                   +---------+---------+
+                   |     pmxcfs        |
+                   |   (Main Daemon)   |
+                   +-------------------+
+
+
+================================================================================
+                          Component Descriptions
+================================================================================
+
+pmxcfs-api-types
+    Shared types, errors, and constants used across all crates
+    - Error types (PmxcfsError)
+    - Common data structures
+    - VmType enum (Qemu, Lxc)
+
+pmxcfs-config
+    Corosync configuration parsing and management
+    - Reads /etc/corosync/corosync.conf
+    - Extracts cluster configuration (nodes, quorum, etc.)
+    - Provides Config struct
+
+pmxcfs-memdb
+    In-memory database with SQLite persistence
+    - SQLite schema version 5 (C-compatible)
+    - FUSE plugin system (6 functional + 4 link plugins)
+    - Key-value storage
+    - Version tracking
+
+pmxcfs-rrd
+    Round-Robin Database file management
+    - RRD file creation and updates
+    - Schema definitions (CPU, memory, network, etc.)
+    - Format migration (v1/v2/v3)
+    - rrdcached integration
+
+pmxcfs-status
+    Cluster status tracking
+    - VM/CT registration and tracking
+    - Node online/offline status
+    - RRD data collection
+    - Cluster log storage
+
+pmxcfs-ipc
+    libqb-compatible IPC server
+    - Unix socket server (@pve2)
+    - Wire protocol compatibility with libqb clients
+    - QB_IPC_SOCKET implementation
+    - 13 IPC operations (version, get, set, mkdir, etc.)
+
+pmxcfs-logger
+    Cluster log with distributed synchronization
+    - Ring buffer storage (50,000 entries)
+    - Deduplication
+    - Binary message format (32-byte aligned)
+    - Multi-node synchronization
+
+pmxcfs-dfsm
+    Distributed Finite State Machine
+    - State synchronization via Corosync CPG
+    - Message ordering and queuing
+    - Leader-based updates
+    - Membership change handling
+    - Services:
+      * ClusterDatabaseService (MemDB sync)
+      * StatusSyncService (Status sync)
+
+pmxcfs-services
+    Service lifecycle management framework
+    - Automatic retry logic
+    - Service dependencies
+    - Graceful shutdown
+
+pmxcfs (main daemon)
+    Main binary that integrates all components
+    - FUSE filesystem operations
+    - Corosync/CPG integration
+    - IPC server lifecycle
+    - Plugin system
+    - Daemon process management
+
+
+================================================================================
+                          Data Flow: Write Operation
+================================================================================
+
+User/API
+   |
+   | write to /etc/pve/nodes/node1/qemu-server/100.conf
+   |
+   v
+FUSE Layer (pmxcfs::fuse::filesystem)
+   |
+   | filesystem::write()
+   |
+   v
+MemDB (pmxcfs-memdb)
+   |
+   | memdb.set(path, data)
+   | Update SQLite database
+   |
+   v
+DFSM (pmxcfs-dfsm)
+   |
+   | dfsm.broadcast_update(FuseMessage::Write)
+   |
+   v
+Corosync CPG
+   |
+   | CPG multicast to all nodes
+   |
+   v
+All Cluster Nodes
+   |
+   | Receive CPG message
+   | Apply update to local MemDB
+   | Update FUSE filesystem
+
+
+================================================================================
+                       Data Flow: Cluster Log Entry
+================================================================================
+
+Local Log Event
+   |
+   | cluster log write
+   |
+   v
+Logger (pmxcfs-logger)
+   |
+   | Add to ring buffer
+   | Check for duplicates
+   |
+   v
+Status (pmxcfs-status)
+   |
+   | Store in status subsystem
+   |
+   v
+DFSM (pmxcfs-dfsm)
+   |
+   | Broadcast via StatusSyncService
+   |
+   v
+Corosync CPG
+   |
+   | Multicast to cluster
+   |
+   v
+All Nodes
+   |
+   | Receive and merge log entries
+
+
+================================================================================
+                         Data Flow: IPC Request
+================================================================================
+
+Perl Client (PVE::IPCC)
+   |
+   | libqb IPC request (e.g., get("/nodes/localhost/qemu-server/100.conf"))
+   |
+   v
+IPC Server (pmxcfs-ipc)
+   |
+   | Parse libqb wire protocol
+   | Route to appropriate handler
+   |
+   v
+MemDB (pmxcfs-memdb)
+   |
+   | memdb.get(path)
+   | Query SQLite or plugin
+   |
+   v
+IPC Server
+   |
+   | Format libqb response
+   |
+   v
+Perl Client
+   |
+   | Receive data
+
+
+================================================================================
+                      Initialization Sequence
+================================================================================
+
+1. Parse command line arguments
+   - Debug mode, local mode, paths, etc.
+
+2. Set up logging (tracing)
+   - journald integration
+   - Environment filter
+   - .debug file toggle support
+
+3. Initialize MemDB
+   - Open/create SQLite database
+   - Initialize schema (version 5)
+   - Register plugins
+
+4. Load Corosync configuration
+   - Parse corosync.conf
+   - Extract node info, quorum settings
+
+5. Initialize Status subsystem
+   - Set up VM/CT tracking
+   - Initialize RRD storage
+   - Set up cluster log
+
+6. Create DFSM
+   - Initialize state machine
+   - Set up CPG handler
+   - Register callbacks (MemDbCallbacks, StatusCallbacks)
+
+7. Start Services
+   - ClusterDatabaseService (MemDB sync)
+   - StatusSyncService (Status sync)
+   - QuorumService (quorum monitoring)
+   - ClusterConfigService (config sync)
+
+8. Initialize IPC Server
+   - Create Unix socket (@pve2)
+   - Set up request handlers
+   - Start listening
+
+9. Mount FUSE Filesystem
+   - Create mount point (/etc/pve)
+   - Initialize FUSE operations
+   - Start FUSE event loop
+
+10. Enter main event loop
+    - Handle DFSM messages
+    - Process IPC requests
+    - Service FUSE operations
+    - Monitor quorum
+
+
+================================================================================
+                        Key Design Patterns
+================================================================================
+
+Trait-Based Abstraction
+    - DFSM uses Callbacks trait for MemDB/Status updates
+    - Enables testing with mock implementations
+    - Clean separation of concerns
+
+Service Framework
+    - pmxcfs-services provides retry logic
+    - Services can be started/stopped independently
+    - Automatic error recovery
+
+Plugin System
+    - MemDB supports dynamic plugins
+    - Functional plugins: Generate content on-the-fly
+    - Link plugins: Symlinks to other paths
+    - Examples: .version, .members, .vmlist, etc.
+
+Wire Protocol Compatibility
+    - IPC server implements libqb wire protocol
+    - Binary compatibility with C libqb clients
+    - Enables Perl tools (PVE::IPCC) to work unchanged
+
+Async Runtime
+    - tokio for async I/O
+    - Non-blocking operations
+    - Efficient resource usage
+
+
+================================================================================
+                          Thread Model
+================================================================================
+
+Main Thread
+    - FUSE event loop (blocking)
+    - Handles filesystem operations
+
+Tokio Runtime
+    - IPC server (async)
+    - DFSM message handling (async)
+    - Service tasks (async)
+    - CPG message processing
+
+Background Threads
+    - SQLite I/O (blocking, offloaded)
+    - RRD file writes (blocking)
+
+
+================================================================================
+                          Testing
+================================================================================
+
+Unit Tests
+    - Per-crate unit tests with mock implementations
+    - Run with: cargo test --workspace
+
+Integration Tests
+    - Comprehensive test suite in integration-tests/ directory
+    - Single-node, multi-node, and mixed C/Rust cluster tests
+    - See integration-tests/README.md for full documentation
+
+
+================================================================================
