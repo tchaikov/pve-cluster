@@ -1,0 +1,333 @@
+#!/bin/bash
+# Local test runner - runs integration tests directly on host using temporary directory
+# This allows developers to test pmxcfs without containers
+
+# Note: NOT using "set -e" because pmxcfs running in background can cause premature exit
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+show_help() {
+    cat << EOF
+${CYAN}pmxcfs Local Test Runner${NC}
+
+Run integration tests locally on your machine without containers.
+
+${GREEN}USAGE:${NC}
+    ./test-local [OPTIONS] [TESTS...]
+
+${GREEN}OPTIONS:${NC}
+    --temp-dir PATH    Use specific temporary directory (default: auto-create)
+    --keep-temp        Keep temporary directory after tests
+    --build            Build pmxcfs before testing
+    --debug            Run pmxcfs with debug output
+    --help, -h         Show this help
+
+${GREEN}TESTS:${NC}
+    List of test files to run (relative to tests/ directory)
+    If not specified, runs all local-compatible tests
+
+${GREEN}EXAMPLES:${NC}
+    # Run all local-compatible tests
+    ./test-local
+
+    # Run specific tests
+    ./test-local core/01-test-paths.sh memdb/01-access.sh
+
+    # Use specific temp directory
+    ./test-local --temp-dir /tmp/my-test
+
+    # Keep temp directory for inspection
+    ./test-local --keep-temp
+
+    # Build first, then test
+    ./test-local --build
+
+${GREEN}LOCAL-COMPATIBLE TESTS:${NC}
+    Tests that can run locally (don't require cluster):
+    - core/*          Core functionality
+    - memdb/*         Database operations
+    - fuse/*          FUSE operations (if FUSE available)
+    - ipc/*           IPC socket tests
+    - rrd/*           RRD tests
+    - status/*        Status tests (single-node)
+    - locks/*         Lock management
+    - plugins/*       Plugin tests
+
+${YELLOW}REQUIREMENTS:${NC}
+    - pmxcfs binary built (in ../target/release/pmxcfs)
+    - FUSE support (fusermount or similar)
+    - SQLite (for database tests)
+    - Sufficient permissions for FUSE mounts
+
+${YELLOW}HOW IT WORKS:${NC}
+    1. Creates temporary directory (e.g., /tmp/pmxcfs-test-XXXXX)
+    2. Starts pmxcfs with --test-dir pointing to temp directory
+    3. Runs tests with TEST_DIR environment variable set
+    4. Cleans up (unless --keep-temp specified)
+
+EOF
+}
+
+# Parse arguments
+TEMP_DIR=""
+KEEP_TEMP=false
+BUILD=false
+DEBUG=false
+TESTS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --temp-dir)
+            TEMP_DIR="$2"
+            shift 2
+            ;;
+        --keep-temp)
+            KEEP_TEMP=true
+            shift
+            ;;
+        --build)
+            BUILD=true
+            shift
+            ;;
+        --debug)
+            DEBUG=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *.sh)
+            TESTS+=("$1")
+            shift
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
+# Check pmxcfs binary exists
+PMXCFS_BIN="$PROJECT_ROOT/target/release/pmxcfs"
+if [ ! -f "$PMXCFS_BIN" ]; then
+    if [ "$BUILD" = true ]; then
+        echo -e "${BLUE}Building pmxcfs...${NC}"
+        cd "$PROJECT_ROOT"
+        cargo build --release
+        cd "$SCRIPT_DIR"
+    else
+        echo -e "${RED}ERROR: pmxcfs binary not found at $PMXCFS_BIN${NC}"
+        echo "Run with --build to build it first, or build manually:"
+        echo "  cd $PROJECT_ROOT && cargo build --release"
+        exit 1
+    fi
+fi
+
+# Create or validate temp directory
+if [ -z "$TEMP_DIR" ]; then
+    TEMP_DIR=$(mktemp -d -t pmxcfs-test-XXXXX)
+    echo -e "${BLUE}Created temporary directory: $TEMP_DIR${NC}"
+else
+    if [ ! -d "$TEMP_DIR" ]; then
+        mkdir -p "$TEMP_DIR"
+        echo -e "${BLUE}Created directory: $TEMP_DIR${NC}"
+    else
+        echo -e "${BLUE}Using existing directory: $TEMP_DIR${NC}"
+    fi
+fi
+
+# Create subdirectories
+mkdir -p "$TEMP_DIR"/{db,pve,run,rrd,etc/corosync}
+
+# Set up environment
+export TEST_DIR="$TEMP_DIR"
+export TEST_DB_PATH="$TEMP_DIR/db/config.db"
+export TEST_DB_DIR="$TEMP_DIR/db"
+export TEST_MOUNT_PATH="$TEMP_DIR/pve"
+export TEST_RUN_DIR="$TEMP_DIR/run"
+export TEST_RRD_DIR="$TEMP_DIR/rrd"
+export TEST_ETC_DIR="$TEMP_DIR/etc"
+export TEST_COROSYNC_DIR="$TEMP_DIR/etc/corosync"
+export TEST_SOCKET="@pve2"  # pmxcfs uses this socket name in local mode
+export TEST_PID_FILE="$TEMP_DIR/run/pmxcfs.pid"
+
+echo -e "${CYAN}Test Environment:${NC}"
+echo "  Test directory: $TEST_DIR"
+echo "  FUSE mount:     $TEST_MOUNT_PATH"
+echo "  Database:       $TEST_DB_PATH"
+echo "  Socket:         $TEST_SOCKET"
+echo ""
+
+# Start pmxcfs
+echo -e "${BLUE}Starting pmxcfs...${NC}"
+
+PMXCFS_ARGS=(
+    "--foreground"
+    "--test-dir" "$TEMP_DIR"
+    "--local"
+)
+
+if [ "$DEBUG" = true ]; then
+    export RUST_LOG=debug
+else
+    export RUST_LOG=info
+fi
+
+# Start pmxcfs in background (redirect verbose FUSE output to avoid clutter)
+"$PMXCFS_BIN" "${PMXCFS_ARGS[@]}" > "$TEMP_DIR/pmxcfs.log" 2>&1 &
+PMXCFS_PID=$!
+
+echo "  pmxcfs PID: $PMXCFS_PID"
+
+# Verify pmxcfs started successfully
+sleep 1
+if ! kill -0 $PMXCFS_PID 2>/dev/null; then
+    echo -e "${RED}ERROR: pmxcfs failed to start or exited immediately${NC}"
+    echo "Check log: $TEMP_DIR/pmxcfs.log"
+    exit 1
+fi
+
+# Cleanup function
+cleanup() {
+    echo ""
+    echo -e "${BLUE}Cleaning up...${NC}"
+
+    # Kill pmxcfs
+    if kill -0 $PMXCFS_PID 2>/dev/null; then
+        echo "  Stopping pmxcfs (PID $PMXCFS_PID)..."
+        kill $PMXCFS_PID
+        sleep 1
+        kill -9 $PMXCFS_PID 2>/dev/null || true
+    fi
+
+    # Unmount FUSE if mounted
+    if mountpoint -q "$TEST_MOUNT_PATH" 2>/dev/null; then
+        echo "  Unmounting FUSE: $TEST_MOUNT_PATH"
+        fusermount -u "$TEST_MOUNT_PATH" 2>/dev/null || umount "$TEST_MOUNT_PATH" 2>/dev/null || true
+    fi
+
+    # Remove temp directory
+    if [ "$KEEP_TEMP" = false ]; then
+        echo "  Removing temporary directory: $TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+    else
+        echo -e "${YELLOW}  Keeping temporary directory: $TEMP_DIR${NC}"
+        echo "  To clean up manually: rm -rf $TEMP_DIR"
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+# Wait for pmxcfs to be ready
+echo -e "${BLUE}Waiting for pmxcfs to be ready...${NC}"
+MAX_WAIT=10
+WAITED=0
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if [ -d "$TEST_MOUNT_PATH" ] && mountpoint -q "$TEST_MOUNT_PATH" 2>/dev/null; then
+        echo -e "${GREEN}✓ pmxcfs is ready${NC}"
+        break
+    fi
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+
+if [ $WAITED -ge $MAX_WAIT ]; then
+    echo -e "${RED}ERROR: pmxcfs did not start within ${MAX_WAIT}s${NC}"
+    echo "Check if:"
+    echo "  - FUSE is available (fusermount installed)"
+    echo "  - You have permission to create FUSE mounts"
+    echo "  - Port/socket is not already in use"
+    exit 1
+fi
+
+# Determine which tests to run
+if [ ${#TESTS[@]} -eq 0 ]; then
+    # Run all local-compatible tests
+    TESTS=(
+        core/01-test-paths.sh
+        core/02-plugin-version.sh
+        memdb/01-access.sh
+        fuse/01-operations.sh
+        ipc/01-socket-api.sh
+        rrd/01-rrd-basic.sh
+        rrd/02-schema-validation.sh
+        status/01-status-tracking.sh
+        status/02-status-operations.sh
+        locks/01-lock-management.sh
+        plugins/01-plugin-files.sh
+        plugins/02-clusterlog-plugin.sh
+        clusterlog/01-clusterlog-basic.sh
+    )
+    echo -e "${CYAN}Running all local-compatible tests (${#TESTS[@]} tests)${NC}"
+else
+    echo -e "${CYAN}Running ${#TESTS[@]} specified tests${NC}"
+fi
+
+echo ""
+
+# Run tests
+PASSED=0
+FAILED=0
+TESTS_DIR="$SCRIPT_DIR/tests"
+
+for test in "${TESTS[@]}"; do
+    TEST_FILE="$TESTS_DIR/$test"
+
+    if [ ! -f "$TEST_FILE" ]; then
+        echo -e "${YELLOW}⚠ SKIP${NC}: $test (file not found)"
+        continue
+    fi
+
+    echo -e "${BLUE}━━━ Running: $test${NC}"
+
+    # Check pmxcfs is still running before test
+    if ! kill -0 $PMXCFS_PID 2>/dev/null; then
+        echo -e "${RED}ERROR: pmxcfs died before running test!${NC}"
+        echo "Check log: $TEMP_DIR/pmxcfs.log"
+        exit 1
+    fi
+
+    if bash "$TEST_FILE"; then
+        echo -e "${GREEN}✓ PASS${NC}: $test"
+        ((PASSED++))
+    else
+        echo -e "${RED}✗ FAIL${NC}: $test"
+        ((FAILED++))
+    fi
+
+    # Check pmxcfs is still running after test
+    if ! kill -0 $PMXCFS_PID 2>/dev/null; then
+        echo -e "${YELLOW}WARNING: pmxcfs died during test!${NC}"
+        echo "Check log: $TEMP_DIR/pmxcfs.log"
+    fi
+
+    echo ""
+done
+
+# Summary
+echo -e "${CYAN}═══════════════════════════════════════════════${NC}"
+echo -e "${CYAN}   Test Summary${NC}"
+echo -e "${CYAN}═══════════════════════════════════════════════${NC}"
+echo "Total:  $((PASSED + FAILED))"
+echo -e "${GREEN}Passed: $PASSED${NC}"
+echo -e "${RED}Failed: $FAILED${NC}"
+echo ""
+
+if [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}✓ All tests passed!${NC}"
+    exit 0
+else
+    echo -e "${RED}✗ Some tests failed${NC}"
+    exit 1
+fi
