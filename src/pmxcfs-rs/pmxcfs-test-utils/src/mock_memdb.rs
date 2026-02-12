@@ -17,6 +17,10 @@ const DT_REG: u8 = 8;
 // Lock timeout in seconds (matches C implementation)
 const LOCK_TIMEOUT_SECS: u64 = 120;
 
+/// Normalize a lock identifier into the cache key used by the lock map.
+///
+/// This mirrors the behavior in the production MemDb by ensuring the key is
+/// a relative path starting with the `priv/lock` prefix.
 fn lock_cache_key(path: &str) -> String {
     let trimmed = path.trim_start_matches('/');
     if trimmed.starts_with(LOCK_DIR_PATH) {
