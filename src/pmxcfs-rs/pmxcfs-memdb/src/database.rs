@@ -1621,7 +1621,6 @@ mod tests {
         let path = "/priv/lock/resource";
         let csum1 = [1u8; 32];
         let csum2 = [2u8; 32];
-        let csum3 = [3u8; 32];
 
         // Create the lock file
         db.create(path, libc::S_IFREG, 0, now)?;
@@ -1659,6 +1658,7 @@ mod tests {
 
         // Test lock access using config path (maps to priv/lock)
         let config_path = "/qemu-server/100.conf";
+        let csum3 = [3u8; 32];
         db.acquire_lock(config_path, &csum3)?;
         assert!(db.is_locked(config_path), "Config path should be locked");
         db.release_lock(config_path, &csum3)?;

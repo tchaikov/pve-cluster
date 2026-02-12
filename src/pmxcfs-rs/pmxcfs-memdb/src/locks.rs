@@ -33,7 +33,7 @@ fn lock_cache_key(path: &str) -> String {
     }
 }
 
-fn lock_paths(path: &str) -> (String, String) {
+fn lock_key_and_path(path: &str) -> (String, String) {
     let lock_key = lock_cache_key(path);
     let lock_path = format!("/{}", lock_key);
     (lock_key, lock_path)
@@ -58,7 +58,7 @@ impl MemDb {
     /// Note: DFSM broadcasting of unlock messages to cluster nodes is not yet fully implemented.
     /// See TODOs in filesystem.rs:723 and memdb_callbacks.rs:154 for remaining work.
     pub fn lock_expired(&self, path: &str, csum: &[u8; 32]) -> bool {
-        let (lock_key, _lock_path) = lock_paths(path);
+        let (lock_key, _lock_path) = lock_key_and_path(path);
 
         let mut locks = self.inner.locks.lock();
         let now = SystemTime::now()
@@ -106,7 +106,7 @@ impl MemDb {
             .unwrap_or_default()
             .as_secs();
 
-        let (lock_key, lock_path) = lock_paths(path);
+        let (lock_key, lock_path) = lock_key_and_path(path);
 
         let locks = self.inner.locks.lock();
 
@@ -124,7 +124,9 @@ impl MemDb {
         let lock_name = lock_key.strip_prefix(&lock_prefix).unwrap_or(&lock_key);
 
         if lock_key == LOCK_DIR_PATH || lock_name.is_empty() {
-            return Err(anyhow::anyhow!("Invalid lock name (missing entry)"));
+            return Err(anyhow::anyhow!(
+                "Lock path must include an entry after {LOCK_DIR_PATH}/"
+            ));
         }
 
         // Validate lock name to prevent path traversal
@@ -170,7 +172,7 @@ impl MemDb {
     /// This deletes the directory entry from the database and broadcasts
     /// the delete operation to the cluster via DFSM.
     pub fn release_lock(&self, path: &str, csum: &[u8; 32]) -> Result<()> {
-        let (lock_key, lock_path) = lock_paths(path);
+        let (lock_key, lock_path) = lock_key_and_path(path);
 
         let locks = self.inner.locks.lock();
 
