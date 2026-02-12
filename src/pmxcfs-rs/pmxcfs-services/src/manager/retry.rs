@@ -105,6 +105,8 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     } else {
                         false
                     };
+                    // Restartable services will retry initialization, so we avoid
+                    // forcing a best-effort close that might race with cleanup.
                     if finalize_error_occurred && !config.is_restartable {
                         if fd < 0 {
                             debug!(service = %name, fd, "Skipping close for invalid fd");
@@ -116,7 +118,8 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                             );
                         } else {
                             // SAFETY: finalize() failed, the service is non-restartable, and the
-                            // fd is not a standard stream, so best-effort cleanup avoids leaking.
+                            // fd is not a standard stream. Best-effort close is acceptable here
+                            // because the service will not be restarted.
                             let close_result = unsafe { libc::close(fd) };
                             if close_result == -1 {
                                 error!(
