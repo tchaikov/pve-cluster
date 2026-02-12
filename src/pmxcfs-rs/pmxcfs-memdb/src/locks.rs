@@ -125,7 +125,8 @@ impl MemDb {
 
         if lock_key == LOCK_DIR_PATH || lock_name.is_empty() {
             return Err(anyhow::anyhow!(
-                "Lock path must include an entry after {LOCK_DIR_PATH}/"
+                "Lock path must include an entry after {}/",
+                LOCK_DIR_PATH
             ));
         }
 
