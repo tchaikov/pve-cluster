@@ -3,11 +3,12 @@
 //! Periodically checks for services in Uninitialized or Failed state
 //! and attempts to reinitialize them according to their retry configuration.
 
-use super::state::{FdWrapper, ManagedService, ServiceState};
+use super::state::{FdWrapper, ManagedService, ServiceState, lock_or_recover};
 use crate::service::InitResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use libc;
 use tokio::io::unix::AsyncFd;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
@@ -51,10 +52,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
 
         // Check if this is a retry or first attempt
         let now = Instant::now();
-        let is_first_attempt = managed
-            .last_init_attempt
-            .lock()
-            .expect("poisoned")
+        let is_first_attempt = lock_or_recover(&managed.last_init_attempt, "last_init_attempt")
             .is_none();
 
         // Allow first attempt for all services, but block retries for non-restartable services
@@ -63,14 +61,14 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
         }
 
         // Check retry throttle (only for retries)
-        if let Some(last) = *managed.last_init_attempt.lock().expect("poisoned") {
+        if let Some(last) = *lock_or_recover(&managed.last_init_attempt, "last_init_attempt") {
             if now.duration_since(last) < config.retry_interval {
                 continue;
             }
         }
 
         // Attempt initialization
-        *managed.last_init_attempt.lock().expect("poisoned") = Some(now);
+        *lock_or_recover(&managed.last_init_attempt, "last_init_attempt") = Some(now);
         managed.store_state(ServiceState::Initializing);
 
         debug!(service = %name, "Attempting to initialize service");
@@ -87,7 +85,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
         match service.initialize().await {
             Ok(InitResult::WithFileDescriptor(fd)) => match AsyncFd::new(FdWrapper(fd)) {
                 Ok(async_fd) => {
-                    *managed.async_fd.lock().expect("poisoned") = Some(Arc::new(async_fd));
+                    *lock_or_recover(&managed.async_fd, "async_fd") = Some(Arc::new(async_fd));
                     managed.store_state(ServiceState::Running);
                     managed
                         .error_count
@@ -99,6 +97,11 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     // Finalize to avoid resource leak before marking failed
                     if let Err(fe) = service.finalize().await {
                         error!(service = %name, error = %fe, "Error finalizing after fd registration failure");
+                    }
+                    if fd >= 0 {
+                        unsafe {
+                            libc::close(fd);
+                        }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     // Restartable services go back to Uninitialized for retry;

@@ -16,7 +16,7 @@ mod retry;
 pub(crate) mod state;
 mod timer;
 
-use state::{ManagedService, ServiceState};
+use state::{ManagedService, ServiceState, lock_or_recover};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -148,7 +148,7 @@ async fn shutdown_all_services(services: &HashMap<String, Arc<ManagedService>>) 
 
         // Mark as finalizing to prevent any races with lingering task activity
         managed.store_state(ServiceState::Finalizing);
-        *managed.async_fd.lock().expect("poisoned") = None;
+        *lock_or_recover(&managed.async_fd, "async_fd") = None;
 
         if state == ServiceState::Running || state == ServiceState::Initializing {
             info!(service = %name, "Shutting down service");
