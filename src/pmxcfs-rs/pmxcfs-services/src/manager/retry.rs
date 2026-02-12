@@ -13,7 +13,7 @@ use tokio::io::unix::AsyncFd;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Spawn a task that periodically retries initialization of failed services.
 ///
@@ -98,15 +98,23 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     if let Err(fe) = service.finalize().await {
                         error!(service = %name, error = %fe, "Error finalizing after fd registration failure");
                     }
-                    if fd > libc::STDERR_FILENO {
-                        let close_result = unsafe { libc::close(fd) };
-                        if close_result != 0 {
-                            error!(
+                    if fd >= 0 {
+                        if fd <= libc::STDERR_FILENO {
+                            warn!(
                                 service = %name,
                                 fd,
-                                error = %std::io::Error::last_os_error(),
-                                "Failed to close fd after registration failure"
+                                "Refusing to close standard fd after registration failure"
                             );
+                        } else {
+                            let close_result = unsafe { libc::close(fd) };
+                            if close_result == -1 {
+                                error!(
+                                    service = %name,
+                                    fd,
+                                    error = %std::io::Error::last_os_error(),
+                                    "Failed to close fd after registration failure"
+                                );
+                            }
                         }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
