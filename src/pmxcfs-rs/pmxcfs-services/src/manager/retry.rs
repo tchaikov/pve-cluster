@@ -95,10 +95,17 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                 Err(e) => {
                     error!(service = %name, fd, error = %e, "Failed to register fd");
                     // Finalize to avoid resource leak before marking failed
-                    if let Err(fe) = service.finalize().await {
-                        error!(service = %name, error = %fe, "Error finalizing after fd registration failure");
-                    }
-                    if fd >= 0 {
+                    let finalize_failed = if let Err(fe) = service.finalize().await {
+                        error!(
+                            service = %name,
+                            error = %fe,
+                            "Error finalizing after fd registration failure"
+                        );
+                        true
+                    } else {
+                        false
+                    };
+                    if finalize_failed && fd >= 0 {
                         if fd <= libc::STDERR_FILENO {
                             warn!(
                                 service = %name,

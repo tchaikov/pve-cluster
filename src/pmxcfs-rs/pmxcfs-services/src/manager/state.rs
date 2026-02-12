@@ -67,7 +67,12 @@ impl Drop for FdWrapper {
     }
 }
 
-/// Lock a mutex, recovering from poison by logging and taking the inner value.
+/// Lock a mutex, recovering from poisoning by logging and taking the inner value.
+///
+/// Mutex poisoning occurs when another thread panics while holding the lock.
+/// For the service manager, a poisoned lock should not crash the entire
+/// supervisor, so we log and continue with the inner state. Use this helper
+/// when best-effort recovery is preferred over propagating a panic.
 pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>, context: &str) -> MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
