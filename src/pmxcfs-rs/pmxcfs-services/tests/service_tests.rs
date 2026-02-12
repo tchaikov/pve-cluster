@@ -197,7 +197,7 @@ async fn test_service_lifecycle_basic() {
     manager.add_service(Box::new(service));
 
     let shutdown_token = manager.shutdown_token();
-    let (handle, manager_handle) = manager.spawn_with_handle();
+    let handle = manager.spawn();
 
     // Wait for initialization and dispatching
     assert!(
@@ -938,7 +938,7 @@ async fn test_invalid_fd_marks_failed() {
     manager.add_service(Box::new(service));
 
     let shutdown_token = manager.shutdown_token();
-    let handle = manager.spawn();
+    let (handle, manager_handle) = manager.spawn_with_handle();
 
     assert!(
         wait_for_condition(

@@ -110,6 +110,7 @@ impl ServiceManager {
 
     /// Spawn the service manager and return a handle for querying state.
     pub fn spawn_with_handle(self) -> (JoinHandle<()>, ServiceManagerHandle) {
+        // Clone the map to share state safely; values are Arcs to ManagedService.
         let services = Arc::new(self.services.clone());
         let handle = tokio::spawn(async move { self.run().await });
         (handle, ServiceManagerHandle { services })

@@ -105,21 +105,27 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     } else {
                         false
                     };
-                    if finalize_failed && fd >= 0 && fd <= libc::STDERR_FILENO {
-                        warn!(
-                            service = %name,
-                            fd,
-                            "Refusing to close standard fd after registration failure"
-                        );
-                    } else if finalize_failed && fd > libc::STDERR_FILENO {
-                        let close_result = unsafe { libc::close(fd) };
-                        if close_result == -1 {
-                            error!(
+                    if finalize_failed {
+                        if fd < 0 {
+                            // Nothing to close for invalid fds.
+                        } else if fd <= libc::STDERR_FILENO {
+                            warn!(
                                 service = %name,
                                 fd,
-                                error = %std::io::Error::last_os_error(),
-                                "Failed to close fd after registration failure"
+                                "Refusing to close standard fd after registration failure"
                             );
+                        } else {
+                            // SAFETY: finalize() already failed and the fd is not a standard stream,
+                            // so best-effort cleanup avoids leaking the descriptor.
+                            let close_result = unsafe { libc::close(fd) };
+                            if close_result == -1 {
+                                error!(
+                                    service = %name,
+                                    fd,
+                                    error = %std::io::Error::last_os_error(),
+                                    "Failed to close fd after registration failure"
+                                );
+                            }
                         }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
