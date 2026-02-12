@@ -7,9 +7,10 @@ use crate::service::Service;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::io::unix::AsyncFd;
+use tracing::error;
 
 /// Service lifecycle state
 ///
@@ -63,6 +64,22 @@ impl Drop for FdWrapper {
     fn drop(&mut self) {
         // File descriptor ownership is managed by the service.
         // We just monitor it, so don't close it here.
+    }
+}
+
+/// Lock a mutex, recovering from poisoning by logging and taking the inner value.
+///
+/// Mutex poisoning occurs when another thread panics while holding the lock.
+/// For the service manager, a poisoned lock should not crash the entire
+/// service manager, so we log and continue with the inner state. Use this helper
+/// when best-effort recovery is preferred over propagating a panic.
+pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>, mutex_description: &str) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(error) => {
+            error!(mutex_description, "Mutex poisoned, recovering");
+            error.into_inner()
+        }
     }
 }
 

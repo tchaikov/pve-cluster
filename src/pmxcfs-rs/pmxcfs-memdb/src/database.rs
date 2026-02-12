@@ -1616,6 +1616,7 @@ mod tests {
         // Create parent directory and resource
         db.create("/priv", libc::S_IFDIR, 0, now)?;
         db.create("/priv/lock", libc::S_IFDIR, 0, now)?;
+        db.create("/priv/lock/qemu-server", libc::S_IFDIR, 0, now)?;
 
         let path = "/priv/lock/resource";
         let csum1 = [1u8; 32];
@@ -1654,6 +1655,17 @@ mod tests {
         // Test release non-existent lock
         let result = db.release_lock(path, &csum1);
         assert!(result.is_err(), "Releasing non-existent lock should fail");
+
+        // Test lock access using config path (maps to priv/lock)
+        let config_path = "/qemu-server/100.conf";
+        let csum3 = [3u8; 32];
+        db.acquire_lock(config_path, &csum3)?;
+        assert!(db.is_locked(config_path), "Config path should be locked");
+        db.release_lock(config_path, &csum3)?;
+        assert!(
+            !db.is_locked(config_path),
+            "Config path should be unlocked after release"
+        );
 
         Ok(())
     }

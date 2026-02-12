@@ -16,7 +16,7 @@ mod retry;
 pub(crate) mod state;
 mod timer;
 
-use state::{ManagedService, ServiceState};
+use state::{ManagedService, ServiceState, lock_or_recover};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,6 +38,21 @@ pub struct ServiceManager {
     services: HashMap<String, Arc<ManagedService>>,
     /// Cancellation token for graceful shutdown
     shutdown_token: CancellationToken,
+}
+
+/// Handle for querying service manager state while it runs.
+#[derive(Clone)]
+pub struct ServiceManagerHandle {
+    services: Arc<HashMap<String, Arc<ManagedService>>>,
+}
+
+impl ServiceManagerHandle {
+    /// Check if a service is currently in the Failed state.
+    pub fn is_failed(&self, name: &str) -> Option<bool> {
+        self.services
+            .get(name)
+            .map(|managed| managed.load_state() == ServiceState::Failed)
+    }
 }
 
 impl ServiceManager {
@@ -91,6 +106,14 @@ impl ServiceManager {
     /// ```
     pub fn spawn(self) -> JoinHandle<()> {
         tokio::spawn(async move { self.run().await })
+    }
+
+    /// Spawn the service manager and return a handle for querying state.
+    pub fn spawn_with_handle(self) -> (JoinHandle<()>, ServiceManagerHandle) {
+        // Clone the map to share state safely; values are Arcs to ManagedService.
+        let services = Arc::new(self.services.clone());
+        let handle = tokio::spawn(async move { self.run().await });
+        (handle, ServiceManagerHandle { services })
     }
 
     /// Run the service manager until shutdown is requested.
@@ -148,7 +171,7 @@ async fn shutdown_all_services(services: &HashMap<String, Arc<ManagedService>>) 
 
         // Mark as finalizing to prevent any races with lingering task activity
         managed.store_state(ServiceState::Finalizing);
-        *managed.async_fd.lock().expect("poisoned") = None;
+        *lock_or_recover(&managed.async_fd, "async_fd") = None;
 
         if state == ServiceState::Running || state == ServiceState::Initializing {
             info!(service = %name, "Shutting down service");

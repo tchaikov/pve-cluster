@@ -3,7 +3,7 @@
 //! Handles both file-descriptor-driven (event-based) and polling-based dispatch
 //! modes. Each service gets its own dispatch task.
 
-use super::state::{FdWrapper, ManagedService, ServiceState};
+use super::state::{FdWrapper, ManagedService, ServiceState, lock_or_recover};
 use crate::service::DispatchAction;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ pub(crate) fn spawn_dispatch_tasks(
                 }
 
                 // Dispatch based on service type
-                let async_fd = managed.async_fd.lock().expect("poisoned").clone();
+                let async_fd = lock_or_recover(&managed.async_fd, "async_fd").clone();
 
                 if let Some(fd) = async_fd {
                     dispatch_with_fd(&name, &managed, &fd, &token).await;
@@ -185,7 +185,7 @@ pub(super) async fn reinitialize_service(name: &str, managed: &Arc<ManagedServic
     // 2. No new fd reads can start after we clear async_fd
     // 3. Timer callbacks won't fire (they check for Running state)
     managed.store_state(ServiceState::Finalizing);
-    *managed.async_fd.lock().expect("poisoned") = None;
+    *lock_or_recover(&managed.async_fd, "async_fd") = None;
 
     let mut service = managed.service.lock().await;
 

@@ -873,6 +873,109 @@ async fn test_non_restartable_dispatch_failure_is_terminal() {
     let _ = handle.await;
 }
 
+// ===== Invalid FD initialization test =====
+
+struct InvalidFdService {
+    name: String,
+    init_count: Arc<AtomicU32>,
+    finalize_count: Arc<AtomicU32>,
+}
+
+impl InvalidFdService {
+    fn new(name: &str) -> (Self, Arc<AtomicU32>, Arc<AtomicU32>) {
+        let init_count = Arc::new(AtomicU32::new(0));
+        let finalize_count = Arc::new(AtomicU32::new(0));
+        (
+            Self {
+                name: name.to_string(),
+                init_count: init_count.clone(),
+                finalize_count: finalize_count.clone(),
+            },
+            init_count,
+            finalize_count,
+        )
+    }
+}
+
+#[async_trait]
+impl Service for InvalidFdService {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn initialize(&mut self) -> pmxcfs_services::Result<InitResult> {
+        self.init_count.fetch_add(1, Ordering::SeqCst);
+        Ok(InitResult::WithFileDescriptor(-1))
+    }
+
+    async fn dispatch(&mut self) -> pmxcfs_services::Result<DispatchAction> {
+        Ok(DispatchAction::Continue)
+    }
+
+    async fn finalize(&mut self) -> pmxcfs_services::Result<()> {
+        self.finalize_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn is_restartable(&self) -> bool {
+        false
+    }
+
+    fn retry_interval(&self) -> Duration {
+        Duration::from_millis(100)
+    }
+
+    fn dispatch_interval(&self) -> Duration {
+        Duration::from_millis(50)
+    }
+}
+
+#[tokio::test]
+async fn test_invalid_fd_marks_failed() {
+    let (service, init_count, finalize_count) = InvalidFdService::new("bad_fd");
+
+    let mut manager = ServiceManager::new();
+    manager.add_service(Box::new(service));
+
+    let shutdown_token = manager.shutdown_token();
+    let (handle, manager_handle) = manager.spawn_with_handle();
+
+    assert!(
+        wait_for_condition(
+            || finalize_count.load(Ordering::SeqCst) >= 1,
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+        )
+        .await,
+        "Invalid fd service should finalize after registration failure"
+    );
+
+    assert!(
+        wait_for_condition(
+            || manager_handle.is_failed("bad_fd") == Some(true),
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+        )
+        .await,
+        "Invalid fd service should reach Failed state"
+    );
+
+    let init_after_fail = init_count.load(Ordering::SeqCst);
+    let retried = wait_for_condition(
+        || init_count.load(Ordering::SeqCst) > init_after_fail,
+        Duration::from_millis(500),
+        Duration::from_millis(10),
+    )
+    .await;
+    assert!(
+        !retried,
+        "Non-restartable invalid fd service should not retry"
+    );
+
+    shutdown_token.cancel();
+    let _ = handle.await;
+}
+
 // ===== Timer Callback Tests =====
 
 #[tokio::test]

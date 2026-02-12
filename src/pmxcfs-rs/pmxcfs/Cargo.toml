@@ -54,7 +54,7 @@ bincode.workspace = true
 clap = { version = "4.4", features = ["derive"] }
 
 # FUSE filesystem (using local fork with rename support)
-proxmox-fuse = { path = "../../../../proxmox-fuse-rs" }
+proxmox-fuse = { git = "https://github.com/tchaikov/proxmox-fuse-rs.git", rev = "752978fe9ca81225ec00dbeff5e8e33e5a5bd56e" }
 
 # Network and cluster
 bytes.workspace = true

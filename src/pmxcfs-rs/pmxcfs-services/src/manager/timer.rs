@@ -3,7 +3,7 @@
 //! Periodically invokes timer callbacks for running services that have
 //! configured a timer period.
 
-use super::state::{ManagedService, ServiceState};
+use super::state::{ManagedService, ServiceState, lock_or_recover};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -60,7 +60,7 @@ async fn invoke_timer_callbacks(services: &HashMap<String, Arc<ManagedService>>)
 
         // Check if it's time to invoke timer
         let should_invoke =
-            match *managed.last_timer_invoke.lock().expect("poisoned") {
+            match *lock_or_recover(&managed.last_timer_invoke, "last_timer_invoke") {
                 Some(last) => now.duration_since(last) >= period,
                 None => true, // First invocation
             };
@@ -69,7 +69,7 @@ async fn invoke_timer_callbacks(services: &HashMap<String, Arc<ManagedService>>)
             continue;
         }
 
-        *managed.last_timer_invoke.lock().expect("poisoned") = Some(now);
+        *lock_or_recover(&managed.last_timer_invoke, "last_timer_invoke") = Some(now);
 
         debug!(service = %name, "Invoking timer callback");
 

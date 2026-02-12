@@ -3,16 +3,20 @@
 //! Periodically checks for services in Uninitialized or Failed state
 //! and attempts to reinitialize them according to their retry configuration.
 
-use super::state::{FdWrapper, ManagedService, ServiceState};
+use super::state::{FdWrapper, ManagedService, ServiceState, lock_or_recover};
 use crate::service::InitResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use libc;
 use tokio::io::unix::AsyncFd;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+// Standard fds are 0..=2 (stdin/stdout/stderr).
+const STANDARD_FD_MAX: i32 = libc::STDERR_FILENO;
 
 /// Spawn a task that periodically retries initialization of failed services.
 ///
@@ -51,10 +55,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
 
         // Check if this is a retry or first attempt
         let now = Instant::now();
-        let is_first_attempt = managed
-            .last_init_attempt
-            .lock()
-            .expect("poisoned")
+        let is_first_attempt = lock_or_recover(&managed.last_init_attempt, "last_init_attempt")
             .is_none();
 
         // Allow first attempt for all services, but block retries for non-restartable services
@@ -63,14 +64,14 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
         }
 
         // Check retry throttle (only for retries)
-        if let Some(last) = *managed.last_init_attempt.lock().expect("poisoned") {
+        if let Some(last) = *lock_or_recover(&managed.last_init_attempt, "last_init_attempt") {
             if now.duration_since(last) < config.retry_interval {
                 continue;
             }
         }
 
         // Attempt initialization
-        *managed.last_init_attempt.lock().expect("poisoned") = Some(now);
+        *lock_or_recover(&managed.last_init_attempt, "last_init_attempt") = Some(now);
         managed.store_state(ServiceState::Initializing);
 
         debug!(service = %name, "Attempting to initialize service");
@@ -87,7 +88,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
         match service.initialize().await {
             Ok(InitResult::WithFileDescriptor(fd)) => match AsyncFd::new(FdWrapper(fd)) {
                 Ok(async_fd) => {
-                    *managed.async_fd.lock().expect("poisoned") = Some(Arc::new(async_fd));
+                    *lock_or_recover(&managed.async_fd, "async_fd") = Some(Arc::new(async_fd));
                     managed.store_state(ServiceState::Running);
                     managed
                         .error_count
@@ -97,8 +98,41 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                 Err(e) => {
                     error!(service = %name, fd, error = %e, "Failed to register fd");
                     // Finalize to avoid resource leak before marking failed
-                    if let Err(fe) = service.finalize().await {
-                        error!(service = %name, error = %fe, "Error finalizing after fd registration failure");
+                    let finalize_error_occurred = if let Err(fe) = service.finalize().await {
+                        error!(
+                            service = %name,
+                            error = %fe,
+                            "Error finalizing after fd registration failure"
+                        );
+                        true
+                    } else {
+                        false
+                    };
+                    // Restartable services will retry initialization, so we avoid
+                    // forcing a best-effort close that might race with cleanup.
+                    if finalize_error_occurred && !config.is_restartable {
+                        if fd < 0 {
+                            debug!(service = %name, fd, "Skipping close for invalid fd");
+                        } else if fd <= STANDARD_FD_MAX {
+                            warn!(
+                                service = %name,
+                                fd,
+                                "Refusing to close standard fd after registration failure"
+                            );
+                        } else {
+                            // SAFETY: finalize() failed, the service is non-restartable, and the
+                            // fd is not a standard stream. Best-effort close is acceptable here
+                            // because the service will not be restarted.
+                            let close_result = unsafe { libc::close(fd) };
+                            if close_result == -1 {
+                                error!(
+                                    service = %name,
+                                    fd,
+                                    error = %std::io::Error::last_os_error(),
+                                    "Failed to close fd after registration failure"
+                                );
+                            }
+                        }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     // Restartable services go back to Uninitialized for retry;
