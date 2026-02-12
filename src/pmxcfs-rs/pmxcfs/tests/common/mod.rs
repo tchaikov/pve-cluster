@@ -163,7 +163,7 @@ pub fn create_ct_config(vmid: u32, cores: u32, memory: u32) -> Vec<u8> {
 ///
 /// # Arguments
 /// * `vmid` - VM ID
-/// * `vm_type` - "qemu" or "lxc"
+/// * `vm_type` - "qemu-server" or "lxc"
 ///
 /// # Returns
 /// Lock path in format `/priv/lock/{vm_type}/{vmid}.conf`
