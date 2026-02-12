@@ -15,6 +15,9 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+// Standard fds are 0..=2 (stdin/stdout/stderr).
+const STANDARD_FD_MAX: i32 = libc::STDERR_FILENO;
+
 /// Spawn a task that periodically retries initialization of failed services.
 ///
 /// The task exits when `token` is cancelled.
@@ -110,7 +113,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     if finalize_error_occurred && !config.is_restartable {
                         if fd < 0 {
                             debug!(service = %name, fd, "Skipping close for invalid fd");
-                        } else if fd <= libc::STDERR_FILENO {
+                        } else if fd <= STANDARD_FD_MAX {
                             warn!(
                                 service = %name,
                                 fd,

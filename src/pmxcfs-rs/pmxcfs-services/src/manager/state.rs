@@ -73,11 +73,11 @@ impl Drop for FdWrapper {
 /// For the service manager, a poisoned lock should not crash the entire
 /// service manager, so we log and continue with the inner state. Use this helper
 /// when best-effort recovery is preferred over propagating a panic.
-pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>, context: &str) -> MutexGuard<'_, T> {
+pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>, mutex_description: &str) -> MutexGuard<'_, T> {
     match mutex.lock() {
         Ok(guard) => guard,
         Err(error) => {
-            error!(context, "Mutex poisoned, recovering");
+            error!(mutex_description, "Mutex poisoned, recovering");
             error.into_inner()
         }
     }
