@@ -95,7 +95,7 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                 Err(e) => {
                     error!(service = %name, fd, error = %e, "Failed to register fd");
                     // Finalize to avoid resource leak before marking failed
-                    let finalize_failed = if let Err(fe) = service.finalize().await {
+                    let finalize_error_occurred = if let Err(fe) = service.finalize().await {
                         error!(
                             service = %name,
                             error = %fe,
@@ -105,9 +105,9 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     } else {
                         false
                     };
-                    if finalize_failed {
+                    if finalize_error_occurred && !config.is_restartable {
                         if fd < 0 {
-                            // Nothing to close for invalid fds.
+                            debug!(service = %name, fd, "Skipping close for invalid fd");
                         } else if fd <= libc::STDERR_FILENO {
                             warn!(
                                 service = %name,
@@ -115,8 +115,8 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                                 "Refusing to close standard fd after registration failure"
                             );
                         } else {
-                            // SAFETY: finalize() already failed and the fd is not a standard stream,
-                            // so best-effort cleanup avoids leaking the descriptor.
+                            // SAFETY: finalize() failed, the service is non-restartable, and the
+                            // fd is not a standard stream, so best-effort cleanup avoids leaking.
                             let close_result = unsafe { libc::close(fd) };
                             if close_result == -1 {
                                 error!(
