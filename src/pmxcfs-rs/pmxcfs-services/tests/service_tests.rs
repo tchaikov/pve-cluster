@@ -197,7 +197,7 @@ async fn test_service_lifecycle_basic() {
     manager.add_service(Box::new(service));
 
     let shutdown_token = manager.shutdown_token();
-    let handle = manager.spawn();
+    let (handle, manager_handle) = manager.spawn_with_handle();
 
     // Wait for initialization and dispatching
     assert!(
@@ -948,6 +948,16 @@ async fn test_invalid_fd_marks_failed() {
         )
         .await,
         "Invalid fd service should finalize after registration failure"
+    );
+
+    assert!(
+        wait_for_condition(
+            || manager_handle.is_failed("bad_fd") == Some(true),
+            Duration::from_secs(5),
+            Duration::from_millis(10),
+        )
+        .await,
+        "Invalid fd service should reach Failed state"
     );
 
     let init_after_fail = init_count.load(Ordering::SeqCst);

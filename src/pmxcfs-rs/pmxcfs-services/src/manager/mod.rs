@@ -40,6 +40,21 @@ pub struct ServiceManager {
     shutdown_token: CancellationToken,
 }
 
+/// Handle for querying service manager state while it runs.
+#[derive(Clone)]
+pub struct ServiceManagerHandle {
+    services: Arc<HashMap<String, Arc<ManagedService>>>,
+}
+
+impl ServiceManagerHandle {
+    /// Check if a service is currently in the Failed state.
+    pub fn is_failed(&self, name: &str) -> Option<bool> {
+        self.services
+            .get(name)
+            .map(|managed| managed.load_state() == ServiceState::Failed)
+    }
+}
+
 impl ServiceManager {
     /// Create a new service manager
     pub fn new() -> Self {
@@ -91,6 +106,13 @@ impl ServiceManager {
     /// ```
     pub fn spawn(self) -> JoinHandle<()> {
         tokio::spawn(async move { self.run().await })
+    }
+
+    /// Spawn the service manager and return a handle for querying state.
+    pub fn spawn_with_handle(self) -> (JoinHandle<()>, ServiceManagerHandle) {
+        let services = Arc::new(self.services.clone());
+        let handle = tokio::spawn(async move { self.run().await });
+        (handle, ServiceManagerHandle { services })
     }
 
     /// Run the service manager until shutdown is requested.

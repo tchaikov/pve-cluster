@@ -105,23 +105,21 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     } else {
                         false
                     };
-                    if finalize_failed && fd >= 0 {
-                        if fd <= libc::STDERR_FILENO {
-                            warn!(
+                    if finalize_failed && fd >= 0 && fd <= libc::STDERR_FILENO {
+                        warn!(
+                            service = %name,
+                            fd,
+                            "Refusing to close standard fd after registration failure"
+                        );
+                    } else if finalize_failed && fd > libc::STDERR_FILENO {
+                        let close_result = unsafe { libc::close(fd) };
+                        if close_result == -1 {
+                            error!(
                                 service = %name,
                                 fd,
-                                "Refusing to close standard fd after registration failure"
+                                error = %std::io::Error::last_os_error(),
+                                "Failed to close fd after registration failure"
                             );
-                        } else {
-                            let close_result = unsafe { libc::close(fd) };
-                            if close_result == -1 {
-                                error!(
-                                    service = %name,
-                                    fd,
-                                    error = %std::io::Error::last_os_error(),
-                                    "Failed to close fd after registration failure"
-                                );
-                            }
                         }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
