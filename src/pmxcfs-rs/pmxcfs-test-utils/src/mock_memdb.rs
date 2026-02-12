@@ -5,7 +5,7 @@
 
 use anyhow::{Result, bail};
 use parking_lot::RwLock;
-use pmxcfs_memdb::{MemDbOps, ROOT_INODE, TreeEntry};
+use pmxcfs_memdb::{MemDbOps, LOCK_DIR_PATH, ROOT_INODE, TreeEntry};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +16,15 @@ const DT_REG: u8 = 8;
 
 // Lock timeout in seconds (matches C implementation)
 const LOCK_TIMEOUT_SECS: u64 = 120;
+
+fn lock_key(path: &str) -> String {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed.starts_with(LOCK_DIR_PATH) {
+        trimmed.to_string()
+    } else {
+        format!("{}/{}", LOCK_DIR_PATH, trimmed)
+    }
+}
 
 /// Mock in-memory database for testing
 ///
@@ -401,33 +410,35 @@ impl MemDbOps for MockMemDb {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
+        let key = lock_key(path);
 
-        if let Some((timestamp, existing_csum)) = locks.get(path) {
+        if let Some((timestamp, existing_csum)) = locks.get(&key) {
             // Check if expired
             if now - timestamp > LOCK_TIMEOUT_SECS {
                 // Expired, can acquire
-                locks.insert(path.to_string(), (now, *csum));
+                locks.insert(key, (now, *csum));
                 return Ok(());
             }
 
             // Not expired, check if same checksum (refresh)
             if existing_csum == csum {
-                locks.insert(path.to_string(), (now, *csum));
+                locks.insert(key, (now, *csum));
                 return Ok(());
             }
 
             bail!("Lock already held with different checksum");
         }
 
-        locks.insert(path.to_string(), (now, *csum));
+        locks.insert(key, (now, *csum));
         Ok(())
     }
 
     fn release_lock(&self, path: &str, csum: &[u8; 32]) -> Result<()> {
         let mut locks = self.locks.write();
-        if let Some((_, existing_csum)) = locks.get(path) {
+        let key = lock_key(path);
+        if let Some((_, existing_csum)) = locks.get(&key) {
             if existing_csum == csum {
-                locks.remove(path);
+                locks.remove(&key);
                 return Ok(());
             }
             bail!("Lock checksum mismatch");
@@ -436,7 +447,8 @@ impl MemDbOps for MockMemDb {
     }
 
     fn is_locked(&self, path: &str) -> bool {
-        if let Some((timestamp, _)) = self.locks.read().get(path) {
+        let key = lock_key(path);
+        if let Some((timestamp, _)) = self.locks.read().get(&key) {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -448,7 +460,8 @@ impl MemDbOps for MockMemDb {
     }
 
     fn lock_expired(&self, path: &str, csum: &[u8; 32]) -> bool {
-        if let Some((timestamp, existing_csum)) = self.locks.read().get(path).cloned() {
+        let key = lock_key(path);
+        if let Some((timestamp, existing_csum)) = self.locks.read().get(&key).cloned() {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -460,7 +473,7 @@ impl MemDbOps for MockMemDb {
             // implementation's behavior where lock_expired() with wrong checksum
             // extends the lock timeout.
             if &existing_csum != csum {
-                self.locks.write().insert(path.to_string(), (now, *csum));
+                self.locks.write().insert(key, (now, *csum));
                 return false;
             }
 

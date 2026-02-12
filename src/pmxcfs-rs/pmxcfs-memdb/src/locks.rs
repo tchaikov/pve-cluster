@@ -24,6 +24,21 @@ pub fn is_lock_path(path: &str) -> bool {
     path.starts_with(&lock_prefix) && path.len() > lock_prefix.len()
 }
 
+fn lock_cache_key(path: &str) -> String {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed.starts_with(LOCK_DIR_PATH) {
+        trimmed.to_string()
+    } else {
+        format!("{}/{}", LOCK_DIR_PATH, trimmed)
+    }
+}
+
+fn lock_paths(path: &str) -> (String, String) {
+    let lock_key = lock_cache_key(path);
+    let lock_path = format!("/{}", lock_key);
+    (lock_key, lock_path)
+}
+
 impl MemDb {
     /// Check if a lock has expired (with side effects matching C semantics)
     ///
@@ -43,8 +58,7 @@ impl MemDb {
     /// Note: DFSM broadcasting of unlock messages to cluster nodes is not yet fully implemented.
     /// See TODOs in filesystem.rs:723 and memdb_callbacks.rs:154 for remaining work.
     pub fn lock_expired(&self, path: &str, csum: &[u8; 32]) -> bool {
-        // Normalize path to remove leading slash for consistency
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+        let (lock_key, _lock_path) = lock_paths(path);
 
         let mut locks = self.inner.locks.lock();
         let now = SystemTime::now()
@@ -52,14 +66,14 @@ impl MemDb {
             .unwrap_or_default()
             .as_secs();
 
-        match locks.get_mut(normalized_path) {
+        match locks.get_mut(&lock_key) {
             Some(lock_info) => {
                 // Lock exists in cache - check csum
                 if lock_info.csum != *csum {
                     // Wrong csum - update and reset timeout
                     lock_info.ltime = now;
                     lock_info.csum = *csum;
-                    tracing::error!("Lock checksum mismatch for '{}' - resetting timeout", normalized_path);
+                    tracing::error!("Lock checksum mismatch for '{}' - resetting timeout", lock_key);
                     return false;
                 }
 
@@ -67,7 +81,7 @@ impl MemDb {
                 // Use saturating_sub to handle backward clock jumps
                 let elapsed = now.saturating_sub(lock_info.ltime);
                 if elapsed > LOCK_TIMEOUT {
-                    tracing::debug!(path = normalized_path, elapsed, "Lock expired");
+                    tracing::debug!(path = lock_key, elapsed, "Lock expired");
                     return true; // Expired
                 }
 
@@ -75,14 +89,8 @@ impl MemDb {
             }
             None => {
                 // No lock in cache - create new cache entry
-                locks.insert(
-                    normalized_path.to_string(),
-                    LockInfo {
-                        ltime: now,
-                        csum: *csum,
-                    },
-                );
-                tracing::debug!(path = normalized_path, "Created new lock cache entry");
+                locks.insert(lock_key.clone(), LockInfo { ltime: now, csum: *csum });
+                tracing::debug!(path = lock_key, "Created new lock cache entry");
                 false // Not expired (just created)
             }
         }
@@ -98,13 +106,12 @@ impl MemDb {
             .unwrap_or_default()
             .as_secs();
 
-        // Normalize path to remove leading slash for consistency
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+        let (lock_key, lock_path) = lock_paths(path);
 
         let locks = self.inner.locks.lock();
 
         // Check if there's an existing valid lock in cache
-        if let Some(existing_lock) = locks.get(normalized_path) {
+        if let Some(existing_lock) = locks.get(&lock_key) {
             // Use saturating_sub to handle backward clock jumps
             let lock_age = now.saturating_sub(existing_lock.ltime);
             if lock_age <= LOCK_TIMEOUT && existing_lock.csum != *csum {
@@ -113,19 +120,17 @@ impl MemDb {
         }
 
         // Extract lock name from path like "priv/lock/foo.lock" or "priv/lock/qemu-server/103.conf"
-        let lock_name = if let Some(name) = normalized_path.strip_prefix(&format!("{LOCK_DIR_PATH}/")) {
-            name
-        } else {
-            // Path doesn't start with priv/lock/, use as-is
-            normalized_path
-        };
+        let lock_prefix = format!("{LOCK_DIR_PATH}/");
+        let lock_name = lock_key.strip_prefix(&lock_prefix).unwrap_or(&lock_key);
+
+        if lock_key == LOCK_DIR_PATH || lock_name.is_empty() {
+            return Err(anyhow::anyhow!("Invalid lock name (missing entry)"));
+        }
 
         // Validate lock name to prevent path traversal
         if lock_name.contains("..") {
             return Err(anyhow::anyhow!("Invalid lock name (path traversal): {}", lock_name));
         }
-
-        let lock_path = format!("/{LOCK_DIR_PATH}/{lock_name}");
 
         // Release locks mutex before database operations to avoid deadlock
         drop(locks);
@@ -154,13 +159,7 @@ impl MemDb {
 
         // Update in-memory cache (use normalized path without leading slash)
         let mut locks = self.inner.locks.lock();
-        locks.insert(
-            lock_path.strip_prefix('/').unwrap_or(&lock_path).to_string(),
-            LockInfo {
-                ltime: now,
-                csum: *csum,
-            },
-        );
+        locks.insert(lock_key, LockInfo { ltime: now, csum: *csum });
 
         tracing::debug!("Lock acquired on path: {}", lock_path);
         Ok(())
@@ -171,12 +170,11 @@ impl MemDb {
     /// This deletes the directory entry from the database and broadcasts
     /// the delete operation to the cluster via DFSM.
     pub fn release_lock(&self, path: &str, csum: &[u8; 32]) -> Result<()> {
-        // Normalize path to remove leading slash for consistency
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+        let (lock_key, lock_path) = lock_paths(path);
 
         let locks = self.inner.locks.lock();
 
-        if let Some(lock_info) = locks.get(normalized_path) {
+        if let Some(lock_info) = locks.get(&lock_key) {
             // Only release if checksum matches
             if lock_info.csum != *csum {
                 return Err(anyhow::anyhow!("Cannot release lock: checksum mismatch"));
@@ -187,17 +185,6 @@ impl MemDb {
 
         // Release locks mutex before database operations
         drop(locks);
-
-        // CRITICAL FIX: Construct full lock path (matching acquire_lock behavior)
-        // The normalized_path may be just the lock name or may include priv/lock prefix
-        // We need to ensure we construct the same full path that acquire_lock uses
-        let lock_path = if normalized_path.starts_with(LOCK_DIR_PATH) {
-            // Path already includes priv/lock/, just add leading slash
-            format!("/{}", normalized_path)
-        } else {
-            // Path is just the lock name, construct full path
-            format!("/{}/{}", LOCK_DIR_PATH, normalized_path)
-        };
 
         // Delete lock directory from database
         if self.exists(&lock_path)? {
@@ -210,7 +197,7 @@ impl MemDb {
 
         // Remove from in-memory cache
         let mut locks = self.inner.locks.lock();
-        locks.remove(normalized_path);
+        locks.remove(&lock_key);
 
         tracing::debug!("Lock released on path: {}", lock_path);
         Ok(())
@@ -300,11 +287,10 @@ impl MemDb {
 
     /// Check if a path is locked
     pub fn is_locked(&self, path: &str) -> bool {
-        // Normalize path to remove leading slash for consistency
-        let normalized_path = path.strip_prefix('/').unwrap_or(path);
+        let lock_key = lock_cache_key(path);
 
         let locks = self.inner.locks.lock();
-        if let Some(lock_info) = locks.get(normalized_path) {
+        if let Some(lock_info) = locks.get(&lock_key) {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
