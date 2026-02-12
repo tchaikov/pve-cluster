@@ -5,7 +5,7 @@
 //! implementation's service_confdb functionality.
 
 use async_trait::async_trait;
-use pmxcfs_services::{DispatchAction, InitResult, Service, ServiceError};
+use pmxcfs_services::{Service, ServiceError};
 use rust_corosync::{self as corosync, CsError, cmap};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
@@ -182,7 +182,7 @@ impl Service for ClusterConfigService {
         "cluster-config"
     }
 
-    async fn initialize(&mut self) -> pmxcfs_services::Result<InitResult> {
+    async fn initialize(&mut self) -> pmxcfs_services::Result<std::os::unix::io::RawFd> {
         info!("Initializing cluster configuration service");
 
         // Initialize CMAP connection
@@ -253,10 +253,10 @@ impl Service for ClusterConfigService {
             "Cluster configuration service initialized successfully with fd {}",
             fd
         );
-        Ok(InitResult::WithFileDescriptor(fd))
+        Ok(fd)
     }
 
-    async fn dispatch(&mut self) -> pmxcfs_services::Result<DispatchAction> {
+    async fn dispatch(&mut self) -> pmxcfs_services::Result<bool> {
         let handle = *self.cmap_handle.read().as_ref().ok_or_else(|| {
             ServiceError::DispatchFailed("CMAP handle not initialized".to_string())
         })?;
@@ -273,16 +273,16 @@ impl Service for ClusterConfigService {
                         warn!("Failed to update cluster configuration: {}", e);
                     }
                 }
-                Ok(DispatchAction::Continue)
+                Ok(true)
             }
             Err(CsError::CsErrTryAgain) => {
                 // TRY_AGAIN is expected, continue normally
-                Ok(DispatchAction::Continue)
+                Ok(true)
             }
             Err(CsError::CsErrLibrary) | Err(CsError::CsErrBadHandle) => {
                 // Connection lost, need to reinitialize
                 warn!("CMAP connection lost, requesting reinitialization");
-                Ok(DispatchAction::Reinitialize)
+                Ok(false)
             }
             Err(e) => {
                 error!("CMAP dispatch failed: {:?}", e);

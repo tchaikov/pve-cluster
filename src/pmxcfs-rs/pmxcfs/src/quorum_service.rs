@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
-use pmxcfs_services::{DispatchAction, InitResult, Service, ServiceError};
+use pmxcfs_services::{Service, ServiceError};
 use rust_corosync::{self as corosync, CsError, NodeId, quorum};
 use std::sync::Arc;
 
@@ -44,7 +44,7 @@ impl Service for QuorumService {
         "quorum"
     }
 
-    async fn initialize(&mut self) -> pmxcfs_services::Result<InitResult> {
+    async fn initialize(&mut self) -> pmxcfs_services::Result<std::os::unix::io::RawFd> {
         tracing::info!("Initializing quorum tracking");
 
         // Quorum notification callback
@@ -154,27 +154,27 @@ impl Service for QuorumService {
         *self.quorum_handle.write() = Some(handle);
 
         tracing::info!("Quorum tracking initialized successfully with fd {}", fd);
-        Ok(InitResult::WithFileDescriptor(fd))
+        Ok(fd)
     }
 
-    async fn dispatch(&mut self) -> pmxcfs_services::Result<DispatchAction> {
+    async fn dispatch(&mut self) -> pmxcfs_services::Result<bool> {
         let handle = self.quorum_handle.read().ok_or_else(|| {
             ServiceError::DispatchFailed("Quorum handle not initialized".to_string())
         })?;
 
         // Dispatch all pending events
         match quorum::dispatch(handle, corosync::DispatchFlags::All) {
-            Ok(_) => Ok(DispatchAction::Continue),
+            Ok(_) => Ok(true),
             Err(CsError::CsErrTryAgain) => {
                 // TRY_AGAIN is expected, continue normally
-                Ok(DispatchAction::Continue)
+                Ok(true)
             }
             Err(CsError::CsErrLibrary) | Err(CsError::CsErrBadHandle) => {
                 // Connection lost, need to reinitialize
                 tracing::warn!(
                     "Quorum connection lost (library error), requesting reinitialization"
                 );
-                Ok(DispatchAction::Reinitialize)
+                Ok(false)
             }
             Err(e) => {
                 tracing::error!("Quorum dispatch failed: {:?}", e);
