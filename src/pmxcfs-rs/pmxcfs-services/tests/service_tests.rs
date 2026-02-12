@@ -951,10 +951,14 @@ async fn test_invalid_fd_marks_failed() {
     );
 
     let init_after_fail = init_count.load(Ordering::SeqCst);
-    sleep(Duration::from_millis(500)).await;
-    assert_eq!(
-        init_count.load(Ordering::SeqCst),
-        init_after_fail,
+    let retried = wait_for_condition(
+        || init_count.load(Ordering::SeqCst) > init_after_fail,
+        Duration::from_millis(500),
+        Duration::from_millis(10),
+    )
+    .await;
+    assert!(
+        !retried,
         "Non-restartable invalid fd service should not retry"
     );
 

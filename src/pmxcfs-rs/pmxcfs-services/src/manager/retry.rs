@@ -98,9 +98,15 @@ async fn retry_failed_services(services: &HashMap<String, Arc<ManagedService>>) 
                     if let Err(fe) = service.finalize().await {
                         error!(service = %name, error = %fe, "Error finalizing after fd registration failure");
                     }
-                    if fd >= 0 {
-                        unsafe {
-                            libc::close(fd);
+                    if fd > libc::STDERR_FILENO {
+                        let close_result = unsafe { libc::close(fd) };
+                        if close_result != 0 {
+                            error!(
+                                service = %name,
+                                fd,
+                                error = %std::io::Error::last_os_error(),
+                                "Failed to close fd after registration failure"
+                            );
                         }
                     }
                     managed.error_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
