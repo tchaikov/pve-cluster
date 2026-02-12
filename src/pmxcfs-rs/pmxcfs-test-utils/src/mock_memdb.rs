@@ -17,7 +17,7 @@ const DT_REG: u8 = 8;
 // Lock timeout in seconds (matches C implementation)
 const LOCK_TIMEOUT_SECS: u64 = 120;
 
-fn lock_key(path: &str) -> String {
+fn lock_cache_key(path: &str) -> String {
     let trimmed = path.trim_start_matches('/');
     if trimmed.starts_with(LOCK_DIR_PATH) {
         trimmed.to_string()
@@ -410,7 +410,7 @@ impl MemDbOps for MockMemDb {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let key = lock_key(path);
+        let key = lock_cache_key(path);
 
         if let Some((timestamp, existing_csum)) = locks.get(&key) {
             // Check if expired
@@ -435,7 +435,7 @@ impl MemDbOps for MockMemDb {
 
     fn release_lock(&self, path: &str, csum: &[u8; 32]) -> Result<()> {
         let mut locks = self.locks.write();
-        let key = lock_key(path);
+        let key = lock_cache_key(path);
         if let Some((_, existing_csum)) = locks.get(&key) {
             if existing_csum == csum {
                 locks.remove(&key);
@@ -447,7 +447,7 @@ impl MemDbOps for MockMemDb {
     }
 
     fn is_locked(&self, path: &str) -> bool {
-        let key = lock_key(path);
+        let key = lock_cache_key(path);
         if let Some((timestamp, _)) = self.locks.read().get(&key) {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -460,7 +460,7 @@ impl MemDbOps for MockMemDb {
     }
 
     fn lock_expired(&self, path: &str, csum: &[u8; 32]) -> bool {
-        let key = lock_key(path);
+        let key = lock_cache_key(path);
         if let Some((timestamp, existing_csum)) = self.locks.read().get(&key).cloned() {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)

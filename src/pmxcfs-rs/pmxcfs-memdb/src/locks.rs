@@ -24,6 +24,9 @@ pub fn is_lock_path(path: &str) -> bool {
     path.starts_with(&lock_prefix) && path.len() > lock_prefix.len()
 }
 
+/// Normalize a lock identifier into the cache key used by the lock map.
+///
+/// This ensures the key is a relative path starting with the `priv/lock` prefix.
 fn lock_cache_key(path: &str) -> String {
     let trimmed = path.trim_start_matches('/');
     if trimmed.starts_with(LOCK_DIR_PATH) {
@@ -33,6 +36,10 @@ fn lock_cache_key(path: &str) -> String {
     }
 }
 
+/// Return the lock cache key and absolute filesystem path for a lock entry.
+///
+/// The cache key is used for the in-memory lock map, while the filesystem path
+/// is used for database operations.
 fn lock_key_and_path(path: &str) -> (String, String) {
     let lock_key = lock_cache_key(path);
     let lock_path = format!("/{}", lock_key);
